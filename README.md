@@ -25,3 +25,5 @@ Examples:
   Fix the inconsistencies:
       > python fix_include_statements.py
 ```
+
+Recently, the script was updated to also fix backslashes in include statements, turning them into forward slashes.
