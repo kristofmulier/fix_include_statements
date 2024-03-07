@@ -4,10 +4,12 @@ Copyright 2024 Kristof Mulier.
 """
 # SUMMARY:
 # This script is used to check the codebase for inconsistencies between the include statements in
-# the files and the actual filenames in the filesystem. These inconsistensies can be a problem on
+# the files and the actual filenames in the filesystem. These inconsistencies can be a problem on
 # case-sensitive filesystems, such as Linux, and can cause build errors. The script lists all the
 # inconsistencies and allows the user to fix them by choosing the correct filename from the
-# filesystem. The script is intended to be run from the top-level directory of the codebase.
+# filesystem. Additionally, it corrects backslashes in include statements to use forward slashes
+# for better cross-platform compatibility. The script is intended to be run from the top-level
+# directory of the codebase.
 import os
 import re
 import argparse
@@ -23,11 +25,12 @@ def print_help() -> None:
         "fix_include_statements.py\n"
         "=========================\n"
         "This script is used to check the codebase for inconsistencies between the include\n"
-        "statements in the files and the actual filenames in the filesystem. These inconsis-\n"
-        "tensies can be a problem on case-sensitive filesystems, such as Linux, and can cause\n"
-        "build errors. The script lists all the inconsistencies and allows the user to fix\n"
-        "them by choosing the correct filename from the filesystem. The script is intended to\n"
-        "be run from the top-level directory of the codebase.\n"
+        "statements in the files and the actual filenames in the filesystem, and to correct\n"
+        "backslashes in include statements to use forward slashes. These inconsistencies can\n"
+        "be a problem on case-sensitive filesystems, such as Linux, and can cause build errors.\n"
+        "The script lists all the inconsistencies and allows the user to fix them by choosing\n"
+        "the correct filename from the filesystem. The script is intended to be run from the\n"
+        "top-level directory of the codebase.\n"
         "\n"
         "Usage: python fix_include_statements.py [options]\n"
         "\n"
@@ -48,7 +51,7 @@ def print_help() -> None:
         "  top-level directory:\n"
         "      > python fix_include_statements.py --dry-run\n"
         "\n"
-        "  Fix the inconsistencies:\n"
+        "  Fix the inconsistencies and backslashes in include statements:\n"
         "      > python fix_include_statements.py\n"
         "\n"
     )
@@ -73,12 +76,13 @@ def crawl_codebase(root_dir: str) -> Dict[str, List[str]]:
             with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                 content = f.read()
                 include_list: List[str] = include_pattern.findall(content)
-                include_list = [include.replace('\\', '/') for include in include_list]
+                # include_list = [include.replace('\\', '/') for include in include_list]
                 if include_list:
                     include_dict[relative_path] = include_list
             i += 1
             if i % 100 == 0:
                 print(".", end="")
+                sys.stdout.flush()
             continue
         continue
     print("")
@@ -107,6 +111,7 @@ def list_all_files(root_dir: str) -> Dict[str, List[Tuple[str, str]]]:
             i += 1
             if i % 100 == 0:
                 print(".", end="")
+                sys.stdout.flush()
             continue
         continue
     print("")
@@ -115,7 +120,8 @@ def list_all_files(root_dir: str) -> Dict[str, List[Tuple[str, str]]]:
 def check_codebase(root_dir: str, dry_run:bool) -> None:
     '''
     Checks the codebase for inconsistencies between the include statements in the files and the
-    actual filenames in the filesystem.
+    actual filenames in the filesystem, and corrects backslashes in include statements to use
+    forward slashes.
     '''
     include_dict: Dict[str, List[str]] = crawl_codebase(root_dir)
     all_filenames: Dict[str, List[Tuple[str, str]]] = list_all_files(root_dir)
@@ -132,10 +138,25 @@ def check_codebase(root_dir: str, dry_run:bool) -> None:
             i += 1
             if i % 100 == 0:
                 print(".", end="")
-            include_filename_lower = include_statement_value.split('/')[-1].lower()
+                sys.stdout.flush()
+            include_filename_lower = include_statement_value.replace('\\', '/').split('/')[-1].lower()
             if include_filename_lower not in all_filenames:
                 # The include statement refers to a file that does not exist in the filesystem. This
-                # could be an include from a file in the compiler toolchain (eg. string.h).
+                # could be an include from a file in the compiler toolchain (eg. string.h). We skip,
+                # but not before checking for backslashes.
+                if '\\' in include_statement_value:
+                    if path in results:
+                        results[path][include_statement_value] = {
+                            'actual_filenames': [None, ],
+                            'actual_paths'    : [None, ],
+                        }
+                    else:
+                        results[path] = {
+                            include_statement_value: {
+                                'actual_filenames': [None, ],
+                                'actual_paths'    : [None, ],
+                            },
+                        }
                 continue
 
             # Extract the matches - a list of tuples with the actual filename and its relative path.
@@ -145,7 +166,7 @@ def check_codebase(root_dir: str, dry_run:bool) -> None:
             # Only one match
             if len(matches) == 1:
                 actual_filename, actual_path = matches[0]
-                if actual_filename != include_statement_value.split('/')[-1]:
+                if actual_filename != include_statement_value.replace('\\', '/').split('/')[-1]:
                     if path in results:
                         results[path][include_statement_value] = {
                             'actual_filenames': [actual_filename, ],
@@ -158,17 +179,33 @@ def check_codebase(root_dir: str, dry_run:bool) -> None:
                                 'actual_paths'    : [actual_path, ],
                             },
                         }
+                else:
+                    # Still check for backslashes
+                    if '\\' in include_statement_value:
+                        if path in results:
+                            results[path][include_statement_value] = {
+                                'actual_filenames': [None, ],
+                                'actual_paths'    : [None, ],
+                            }
+                        else:
+                            results[path] = {
+                                include_statement_value: {
+                                    'actual_filenames': [None, ],
+                                    'actual_paths'    : [None, ],
+                                },
+                            }
             # Multiple matches
             else:
                 actual_filenames = []
                 actual_paths = []
+                filename_matches: bool = False
                 for match in matches:
                     actual_filename, actual_path = match
                     actual_filenames.append(actual_filename)
                     actual_paths.append(actual_path)
-                    if actual_filename == include_statement_value.split('/')[-1]:
-                        break
-                else:
+                    if actual_filename == include_statement_value.replace('\\', '/').split('/')[-1]:
+                        filename_matches = True
+                if not filename_matches:
                     if path in results:
                         results[path][include_statement_value] = {
                             'actual_filenames': actual_filenames,
@@ -181,6 +218,21 @@ def check_codebase(root_dir: str, dry_run:bool) -> None:
                                 'actual_paths'    : actual_paths,
                             },
                         }
+                else:
+                    # Still check for backslashes
+                    if '\\' in include_statement_value:
+                        if path in results:
+                            results[path][include_statement_value] = {
+                                'actual_filenames': [None, ],
+                                'actual_paths'    : [None, ],
+                            }
+                        else:
+                            results[path] = {
+                                include_statement_value: {
+                                    'actual_filenames': [None, ],
+                                    'actual_paths'    : [None, ],
+                                },
+                            }
             continue
         continue
     print("\n")
@@ -209,12 +261,19 @@ def check_codebase(root_dir: str, dry_run:bool) -> None:
             for j in range(len(actual_filenames_and_paths['actual_filenames'])):
                 actual_filename = actual_filenames_and_paths['actual_filenames'][j]
                 actual_path = actual_filenames_and_paths['actual_paths'][j]
-                correct_include_statement_values.append(
-                    include_statement_value.replace(
-                        include_statement_value.split('/')[-1], actual_filename
+                if actual_filename is None:
+                    # Just correct the backslashes
+                    correct_include_statement_values.append(
+                        include_statement_value.replace('\\', '/')
                     )
-                )
-                print(f"        {j + 1}: '#include \"{correct_include_statement_values[-1]}\"' ({actual_path})")
+                    print(f"        {j + 1}: '#include \"{correct_include_statement_values[-1]}\"'")
+                else:
+                    correct_include_statement_values.append(
+                        include_statement_value.replace(
+                            include_statement_value.replace('\\', '/').split('/')[-1], actual_filename
+                        ).replace('\\', '/')
+                    )
+                    print(f"        {j + 1}: '#include \"{correct_include_statement_values[-1]}\"' ({actual_path})")
             print(f"        {j + 2}: Skip")
             print(f"        {j + 3}: Fix all {n} files automatically")
             print(f"        {j + 4}: Skip all - quit program")
