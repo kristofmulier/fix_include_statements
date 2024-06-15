@@ -240,8 +240,10 @@ def check_codebase(root_dir: str, dry_run:bool) -> None:
     print("========")
     n = len(results)
     print(
-        f"Found {n} inconsistencies between the include statements and the actual "
-        f"filenames in the filesystem.\n"
+        f"Found {n} include statement issues:\n"
+        f"  - Inconsistencies between the include statement and filename in the filesystem.\n"
+        f"  - Backslashes in the include statement (causes build to fail on Linux).\n"
+        f"Start fix...\n"
     )
     k = 0
     s = 0
